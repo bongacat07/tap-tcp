@@ -1,8 +1,3 @@
-pub enum Packet {
-    IPv4(Ipv4Packet),
-    IPv6(Ipv6Header),
-    Unknown,
-}
 
 pub struct Ipv4HeaderFields {
     pub version: u8,
@@ -28,6 +23,7 @@ pub struct Ipv4Packet {
 }
 
 pub fn print_ipv4(h: &Ipv4Packet) {
+    println!("\n");
     println!("--- IPv4 Packet ---");
     println!("Version: {}", h.header.fields.version);
     println!("IHL: {}", h.header.fields.ihl);
@@ -43,86 +39,89 @@ pub fn print_ipv4(h: &Ipv4Packet) {
         h.header.fields.destination[2],
         h.header.fields.destination[3]);
     println!("-------------------");
+    println!("\n");
 }
 
-pub fn parser(buf: &[u8]) -> Packet {
-    if buf.is_empty() {
-        return Packet::Unknown;
+pub fn parse_ipv4(buf: &[u8]) -> Option<Ipv4Packet> {
+    // Minimum IPv4 header size
+    if buf.len() < 20 {
+        return None;
     }
 
-    match buf[0] >> 4 {
-        // ---------------- IPv4 ----------------
-        4 => {
-            if buf.len() < 20 {
-                return Packet::Unknown;
-            }
+    let version = buf[0] >> 4;
+    let ihl = buf[0] & 0x0f;
 
-            let ihl = buf[0] & 0x0F;
-            if ihl < 5 {
-                return Packet::Unknown;
-            }
-
-            let total_length = u16::from_be_bytes([buf[2], buf[3]]);
-            if total_length as usize > buf.len() {
-                return Packet::Unknown;
-            }
-
-            let header_end = (ihl * 4) as usize;
-            if header_end > total_length as usize {
-                return Packet::Unknown;
-            }
-
-            let payload = buf[header_end..total_length as usize].to_vec();
-
-            Packet::IPv4(Ipv4Packet {
-                header: Ipv4Header {
-                    fields: Ipv4HeaderFields {
-                        version: 4,
-                        ihl,
-                        tos: buf[1],
-                        total_length,
-                        identification: u16::from_be_bytes([buf[4], buf[5]]),
-                        flags: buf[6] >> 5,
-                        fragment_offset: (((buf[6] as u16) & 0x1F) << 8) | buf[7] as u16,
-                        ttl: buf[8],
-                        protocol: buf[9],
-                        source: [buf[12], buf[13], buf[14], buf[15]],
-                        destination: [buf[16], buf[17], buf[18], buf[19]],
-                    },
-                    header_checksum: u16::from_be_bytes([buf[10], buf[11]]),
-                },
-                payload,
-            })
-        }
-
-        // ---------------- IPv6 ----------------
-        6 => {
-            if buf.len() < 40 {
-                return Packet::Unknown;
-            }
-
-            let payload_length = u16::from_be_bytes([buf[4], buf[5]]);
-            if 40 + payload_length as usize > buf.len() {
-                return Packet::Unknown;
-            }
-
-            let payload = buf[40..40 + payload_length as usize].to_vec();
-
-            Packet::IPv6(Ipv6Header {
-                version: 6,
-                traffic_class: ((buf[0] & 0x0F) << 4) | (buf[1] >> 4),
-                flow_label: (((buf[1] as u32) & 0x0F) << 16)
-                    | ((buf[2] as u32) << 8)
-                    | buf[3] as u32,
-                payload_length,
-                next_header: buf[6],
-                hop_limit: buf[7],
-                source: buf[8..24].try_into().unwrap(),
-                destination: buf[24..40].try_into().unwrap(),
-                payload,
-            })
-        }
-
-        _ => Packet::Unknown,
+    if version != 4 {
+        return None;
     }
+
+    // IHL is in 32-bit words
+    if ihl < 5 {
+        return None;
+    }
+
+    let header_len = (ihl as usize) * 4;
+
+    if buf.len() < header_len {
+        return None;
+    }
+
+    let total_length = u16::from_be_bytes([buf[2], buf[3]]);
+
+    if total_length < header_len as u16 {
+        return None;
+    }
+
+    if total_length as usize > buf.len() {
+        return None;
+    }
+
+    let payload = buf[header_len..total_length as usize].to_vec();
+
+    Some(Ipv4Packet {
+        header: Ipv4Header {
+            fields: Ipv4HeaderFields {
+                version,
+                ihl,
+                tos: buf[1],
+                total_length,
+
+                identification: u16::from_be_bytes([
+                    buf[4],
+                    buf[5],
+                ]),
+
+                flags: buf[6] >> 5,
+
+                fragment_offset:
+                    (((buf[6] as u16) & 0x1f) << 8)
+                    | buf[7] as u16,
+
+                ttl: buf[8],
+
+                protocol: buf[9],
+
+                source: [
+                    buf[12],
+                    buf[13],
+                    buf[14],
+                    buf[15],
+                ],
+
+                destination: [
+                    buf[16],
+                    buf[17],
+                    buf[18],
+                    buf[19],
+                ],
+            },
+
+            header_checksum: u16::from_be_bytes([
+                buf[10],
+                buf[11],
+            ]),
+        },
+
+        payload,
+    })
 }

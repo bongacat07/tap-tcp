@@ -1,4 +1,4 @@
-
+use tun_tap::Iface;
 
 pub struct ArpPacket {
     pub hardware_type: u16,
@@ -45,4 +45,22 @@ pub fn print_arp(a: &ArpPacket) {
         src_mac, src_ip[0], src_ip[1], src_ip[2], src_ip[3],
         tgt_mac, tgt_ip[0], tgt_ip[1], tgt_ip[2], tgt_ip[3],
     );
+}
+
+pub fn send_arp_reply(iface: &Iface, req: &ArpPacket) {
+    let mut buf = Vec::with_capacity(42);
+
+    buf.extend_from_slice(&req.sender_mac);
+    buf.extend_from_slice(&MY_MAC);
+    buf.extend_from_slice(&0x0806u16.to_be_bytes());
+    buf.extend_from_slice(&req.hardware_type.to_be_bytes());
+    buf.extend_from_slice(&req.protocol_type.to_be_bytes());
+    buf.push(req.hardware_size);
+    buf.push(req.protocol_size);
+    buf.extend_from_slice(&2u16.to_be_bytes());
+    buf.extend_from_slice(&MY_MAC);
+    buf.extend_from_slice(&MY_IP);
+    buf.extend_from_slice(&req.sender_mac);
+    buf.extend_from_slice(&req.sender_ip);
+    iface.send(&buf);
 }
