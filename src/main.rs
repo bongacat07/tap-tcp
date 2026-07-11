@@ -1,55 +1,64 @@
-use tun_tap::{Iface, Mode};
-use tap_tcp::eth::ethernet::{EthernetFrame,parse_ethernet_frame,print_ethernet_frame};
-use tap_tcp::eth::arp::{parse_arp,ArpPacket,print_arp,send_arp_reply};
-use tap_tcp::ip::ip::{parse_ipv4,print_ipv4, Ipv4Packet};
-use tap_tcp::icmp::icmp::{parse_icmp,print_icmp,ICMP};
 use tap_tcp::checksum::checksum::checksum;
+use tap_tcp::eth::arp::{ArpPacket, parse_arp, print_arp, send_arp_reply};
+use tap_tcp::eth::ethernet::{EthernetFrame, parse_ethernet_frame, print_ethernet_frame};
+use tap_tcp::icmp::icmp::*;
+use tap_tcp::ip::ip::*;
+use tun_tap::{Iface, Mode};
 
- fn send_icmp_echo_reply( iface: &Iface,eth: &EthernetFrame,ipv4: &Ipv4Packet,icmp: &ICMP,) {
-    let mut icmp_buf = Vec::new();
+fn send_icmp_echo_reply(iface: &Iface, eth: &EthernetFrame, ipv4: &Ipv4Packet, icmp: &IcmpPacket) {
+    let mut icmp_header = IcmpHeader {
+        icmp_type: 0,
+        code: 0,
+        checksum: 0,
+        extended_header: icmp.fields.extended_header,
+    };
 
-        icmp_buf.push(0);
-        icmp_buf.push(0);
-        icmp_buf.extend_from_slice(&[0, 0]); // checksum placeholder
-        icmp_buf.extend_from_slice(&icmp.extended_header.to_be_bytes());
-        icmp_buf.extend_from_slice(&icmp.payload);
-        let icmp_checksum = checksum(&icmp_buf);
-        icmp_buf[2..4].copy_from_slice(&icmp_checksum.to_be_bytes());
+    let mut icmp_buf = serialize_icmp_header(&icmp_header);
+    icmp_buf.extend_from_slice(&icmp.payload);
 
+    let icmp_checksum = checksum(&icmp_buf);
+    icmp_header.checksum = icmp_checksum;
+    let mut icmp_buf = serialize_icmp_header(&icmp_header);
+    icmp_buf.extend_from_slice(&icmp.payload);
 
-        let total_length = (20 + icmp_buf.len()) as u16;
-        let mut ip_buf = Vec::new();
-        ip_buf.push((4 << 4) | 5);
-        ip_buf.push(0);
-        ip_buf.extend_from_slice(&total_length.to_be_bytes());
-        ip_buf.extend_from_slice(&0u16.to_be_bytes());
-        ip_buf.extend_from_slice(&0u16.to_be_bytes());
-        ip_buf.push(64);
-        ip_buf.push(1);
-        ip_buf.extend_from_slice(&[0, 0]);
-        ip_buf.extend_from_slice(&MY_IP);
-        ip_buf.extend_from_slice(&ipv4.header.fields.source);
-        let ip_checksum = checksum(&ip_buf[..20]);
-        ip_buf[10..12].copy_from_slice(&ip_checksum.to_be_bytes());
-        ip_buf.extend_from_slice(&icmp_buf);
+    let total_length = (20 + icmp_buf.len()) as u16;
+    let mut ip_header = Ipv4Header {
+        fields: Ipv4HeaderFields {
+            version: 4,
+            ihl: 5,
+            tos: 0,
+            total_length,
+            identification: 0,
+            flags: 0,
+            fragment_offset: 0,
+            ttl: 64,
+            protocol: 1,
+            source: MY_IP,
+            destination: ipv4.header.fields.source,
+        },
+        header_checksum: 0,
+    };
 
-        let mut frame = Vec::new();
-        frame.extend_from_slice(&eth.src_mac);
-        frame.extend_from_slice(&MY_MAC);
-        frame.extend_from_slice(&0x0800u16.to_be_bytes());
-        frame.extend_from_slice(&ip_buf);
-        iface.send(&frame).expect("failed to send");
-    }
+    let ip_buf_for_checksum = serialize_ipv4_header(&ip_header);
+    let ip_checksum = checksum(&ip_buf_for_checksum[..20]);
+    ip_header.header_checksum = ip_checksum;
 
+    let mut ip_buf = serialize_ipv4_header(&ip_header);
+    ip_buf.extend_from_slice(&icmp_buf);
 
+    let mut frame = Vec::new();
+    frame.extend_from_slice(&eth.src_mac);
+    frame.extend_from_slice(&MY_MAC);
+    frame.extend_from_slice(&0x0800u16.to_be_bytes());
+    frame.extend_from_slice(&ip_buf);
+
+    iface.send(&frame).expect("failed to send");
+}
 const MY_MAC: [u8; 6] = [0x06, 0x09, 0x04, 0x02, 0x00, 0x0a];
-const MY_IP:  [u8; 4] = [10, 0, 0, 2];
-
-
+const MY_IP: [u8; 4] = [10, 0, 0, 2];
 
 fn main() {
     let iface = Iface::without_packet_info("tap0", Mode::Tap).expect("Failed to create TAP device");
-
 
     println!("Listening on tap0");
 
@@ -72,13 +81,11 @@ fn main() {
 
                     match incoming_arp.opcode {
                         0x0001 => {
-
                             println!("ARP Request Recieved");
                             if incoming_arp.target_ip == MY_IP {
                                 send_arp_reply(&iface, &incoming_arp);
                                 println!("ARP Reply sent");
                             }
-
                         }
 
                         0x0002 => {
@@ -87,24 +94,34 @@ fn main() {
 
                         _ => {}
                     }
-
                 }
             }
             0x0800 => {
                 if let Some(ipv4) = parse_ipv4(&frame.payload) {
-
-
                     match ipv4.header.fields.protocol {
                         1 => {
-                            println!("ICMP Packet recieved");
+                            println!("IP Packet recieved");
+                            let bytes = serialize_ipv4_header(&ipv4.header);
+                            if checksum(&bytes) == 0 {
+                                // checksum is valid
+                            } else {
+                                // checksum is invalid
+                            }
+
                             print_ipv4(&ipv4);
                             if let Some(incoming_icmp) = parse_icmp(&ipv4.payload) {
                                 print_icmp(&incoming_icmp);
 
-                                match incoming_icmp.icmp_type {
+                                match incoming_icmp.fields.icmp_type {
                                     8 => {
+                                        let bytes = serialize_icmp_header(&incoming_icmp.fields);
+                                        if checksum(&bytes) == 0 {
+                                            // checksum is valid
+                                        } else {
+                                            // checksum is invalid
+                                        }
                                         println!("ICMP Echo Request");
-                                        send_icmp_echo_reply(&iface,&frame,&ipv4,&incoming_icmp);
+                                        send_icmp_echo_reply(&iface, &frame, &ipv4, &incoming_icmp);
                                         println!("ICMP Reply Sent");
                                     }
 
@@ -115,18 +132,12 @@ fn main() {
                                     _ => {}
                                 }
                             }
-
-
                         }
                         _ => {}
                     }
                 }
-
             }
-            _ => {
-
-            }
+            _ => {}
         }
-
     }
 }

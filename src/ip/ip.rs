@@ -1,4 +1,3 @@
-
 pub struct Ipv4HeaderFields {
     pub version: u8,
     pub ihl: u8,
@@ -28,16 +27,20 @@ pub fn print_ipv4(h: &Ipv4Packet) {
     println!("Version: {}", h.header.fields.version);
     println!("IHL: {}", h.header.fields.ihl);
     println!("Protocol: {}", h.header.fields.protocol);
-    println!("Source: {}.{}.{}.{}",
+    println!(
+        "Source: {}.{}.{}.{}",
         h.header.fields.source[0],
         h.header.fields.source[1],
         h.header.fields.source[2],
-        h.header.fields.source[3]);
-    println!("Destination: {}.{}.{}.{}",
+        h.header.fields.source[3]
+    );
+    println!(
+        "Destination: {}.{}.{}.{}",
         h.header.fields.destination[0],
         h.header.fields.destination[1],
         h.header.fields.destination[2],
-        h.header.fields.destination[3]);
+        h.header.fields.destination[3]
+    );
     println!("-------------------");
     println!("\n");
 }
@@ -86,42 +89,41 @@ pub fn parse_ipv4(buf: &[u8]) -> Option<Ipv4Packet> {
                 tos: buf[1],
                 total_length,
 
-                identification: u16::from_be_bytes([
-                    buf[4],
-                    buf[5],
-                ]),
+                identification: u16::from_be_bytes([buf[4], buf[5]]),
 
                 flags: buf[6] >> 5,
 
-                fragment_offset:
-                    (((buf[6] as u16) & 0x1f) << 8)
-                    | buf[7] as u16,
+                fragment_offset: (((buf[6] as u16) & 0x1f) << 8) | buf[7] as u16,
 
                 ttl: buf[8],
 
                 protocol: buf[9],
 
-                source: [
-                    buf[12],
-                    buf[13],
-                    buf[14],
-                    buf[15],
-                ],
+                source: [buf[12], buf[13], buf[14], buf[15]],
 
-                destination: [
-                    buf[16],
-                    buf[17],
-                    buf[18],
-                    buf[19],
-                ],
+                destination: [buf[16], buf[17], buf[18], buf[19]],
             },
 
-            header_checksum: u16::from_be_bytes([
-                buf[10],
-                buf[11],
-            ]),
+            header_checksum: u16::from_be_bytes([buf[10], buf[11]]),
         },
 
         payload,
     })
+}
+
+pub fn serialize_ipv4_header(header: &Ipv4Header) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(20);
+
+    buf.push((header.fields.version << 4) | header.fields.ihl);
+    buf.push(header.fields.tos);
+    buf.extend_from_slice(&header.fields.total_length.to_be_bytes());
+    buf.extend_from_slice(&header.fields.identification.to_be_bytes());
+    let flags_fragment = ((header.fields.flags as u16) << 13) | header.fields.fragment_offset;
+    buf.extend_from_slice(&flags_fragment.to_be_bytes());
+    buf.push(header.fields.ttl);
+    buf.push(header.fields.protocol);
+    buf.extend_from_slice(&header.header_checksum.to_be_bytes());
+    buf.extend_from_slice(&header.fields.source);
+    buf.extend_from_slice(&header.fields.destination);
+    buf
 }
