@@ -3,6 +3,8 @@ use tap_tcp::eth::arp::{ArpPacket, parse_arp, print_arp, send_arp_reply};
 use tap_tcp::eth::ethernet::{EthernetFrame, parse_ethernet_frame, print_ethernet_frame};
 use tap_tcp::icmp::icmp::*;
 use tap_tcp::ip::ip::*;
+use tap_tcp::tcp::tcp::*;
+use tap_tcp::udp::udp::*;
 use tun_tap::{Iface, Mode};
 
 fn send_icmp_echo_reply(iface: &Iface, eth: &EthernetFrame, ipv4: &Ipv4Packet, icmp: &IcmpPacket) {
@@ -110,16 +112,16 @@ fn main() {
 
                             print_ipv4(&ipv4);
                             if let Some(incoming_icmp) = parse_icmp(&ipv4.payload) {
+                                let bytes = serialize_icmp_header(&incoming_icmp.fields);
+                                if checksum(&bytes) == 0 {
+                                    // checksum is valid
+                                } else {
+                                    // checksum is invalid
+                                }
                                 print_icmp(&incoming_icmp);
 
                                 match incoming_icmp.fields.icmp_type {
                                     8 => {
-                                        let bytes = serialize_icmp_header(&incoming_icmp.fields);
-                                        if checksum(&bytes) == 0 {
-                                            // checksum is valid
-                                        } else {
-                                            // checksum is invalid
-                                        }
                                         println!("ICMP Echo Request");
                                         send_icmp_echo_reply(&iface, &frame, &ipv4, &incoming_icmp);
                                         println!("ICMP Reply Sent");
@@ -133,6 +135,37 @@ fn main() {
                                 }
                             }
                         }
+
+                        6 => {
+                            println!("TCP Packet recieved");
+                            let bytes = serialize_ipv4_header(&ipv4.header);
+                            if checksum(&bytes) == 0 {
+                                // checksum is valid
+                            } else {
+                                // checksum is invalid
+                            }
+
+                            print_ipv4(&ipv4);
+                            if let Some(incoming_tcp) = parse_tcp(&ipv4.payload) {
+                                print_tcp(&incoming_tcp);
+                            }
+                        }
+
+                        17 => {
+                            println!("UDP Packet recieved");
+                            let bytes = serialize_ipv4_header(&ipv4.header);
+                            if checksum(&bytes) == 0 {
+                                // checksum is valid
+                            } else {
+                                // checksum is invalid
+                            }
+
+                            print_ipv4(&ipv4);
+                            if let Some(incoming_udp) = parse_udp(&ipv4.payload) {
+                                print_udp(&incoming_udp);
+                            }
+                        }
+
                         _ => {}
                     }
                 }
