@@ -122,3 +122,7 @@ pub fn print_tcp(tcp: &TCPPacket) {
     println!("Flags:    {}", flag_str);
     println!("-----------");
 }
+
+pub fn check_flags(incoming_flags: &u16, tcp_flags: u16) -> bool {
+    return (incoming_flags & tcp_flags != 0);
+}

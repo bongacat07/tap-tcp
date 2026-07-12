@@ -1,4 +1,6 @@
-use tap_tcp::checksum::checksum::checksum;
+use rand::Rng;
+use std::collections::{HashMap, HashSet};
+use tap_tcp::checksum::checksum::{checksum, ip_checksum, tcp_checksum};
 use tap_tcp::eth::arp::{ArpPacket, parse_arp, print_arp, send_arp_reply};
 use tap_tcp::eth::ethernet::{EthernetFrame, parse_ethernet_frame, print_ethernet_frame};
 use tap_tcp::icmp::icmp::*;
@@ -65,6 +67,9 @@ fn main() {
     println!("Listening on tap0");
 
     let mut buf = vec![0u8; 1504];
+    let mut connections: HashMap<ConnectionKey, TCB> = HashMap::new();
+    let mut listener: HashSet<u16> = HashSet::new();
+    listener.insert(8080);
 
     loop {
         let n = iface.recv(&mut buf).expect("Failed to recv");
@@ -146,8 +151,178 @@ fn main() {
                             }
 
                             print_ipv4(&ipv4);
-                            if let Some(incoming_tcp) = parse_tcp(&ipv4.payload) {
-                                print_tcp(&incoming_tcp);
+                            if let Some(tcp) = parse_tcp(&ipv4.payload) {
+                                print_tcp(&tcp);
+
+                                let key = ConnectionKey {
+                                    src_ip: ipv4.header.fields.source,
+                                    src_port: tcp.header.src_port,
+                                    dst_ip: ipv4.header.fields.destination,
+                                    dst_port: tcp.header.dst_port,
+                                };
+
+                                if let Some(tcb) = connections.get_mut(&key) {
+                                    let flags = tcp.header.flags;
+
+                                    if check_flags(&flags, RST) {
+                                        connections.remove(&key);
+                                        println!("RST received, connection aborted");
+                                        continue;
+                                    }
+                                    match tcb.state {
+                                        TCPState::SynReceived => {
+                                            if check_flags(&flags, ACK) {
+                                                if tcp.header.ack_num == tcb.snd_nxt {
+                                                    tcb.state = TCPState::Established;
+                                                    tcb.snd_una = tcp.header.ack_num;
+
+                                                    println!("Handshake complete");
+                                                } else {
+                                                    println!("Invalid ACK");
+                                                    //send rst
+                                                    continue;
+                                                }
+                                            } else {
+                                                //send rst
+                                                connections.remove(&key);
+                                                continue;
+                                            }
+                                        }
+                                        TCPState::SynSent => {
+                                            println!("SynSent: TODO");
+                                            continue;
+                                        }
+                                        TCPState::Established => {
+                                            if flags & 0x02 != 0 {
+                                                println!("Duplicate SYN in Established");
+                                                //send rst
+                                                connections.remove(&key);
+                                                continue;
+                                            }
+
+                                            if flags & 0x18 == 0x18 {}
+                                            if flags & 0x01 != 0 {
+                                                if tcp.header.seq_num == tcb.rcv_nxt {
+                                                    println!("Fin Recieved");
+                                                    tcb.rcv_nxt += 1;
+                                                    //send ack
+                                                    tcb.state = TCPState::CloseWait;
+                                                }
+                                            }
+                                        }
+                                        TCPState::FinWait1 => {
+                                            println!("FinWait1: TODO");
+                                            continue;
+                                        }
+                                        TCPState::FinWait2 => {
+                                            println!("FinWait2: TODO");
+                                            continue;
+                                        }
+                                        TCPState::CloseWait => {
+                                            //send fin
+                                            tcb.snd_nxt += 1;
+                                            tcb.state = TCPState::LastAck;
+                                        }
+                                        TCPState::Closing => {
+                                            println!("Closing: TODO");
+                                            continue;
+                                        }
+                                        TCPState::LastAck => {
+                                            if (flags & 0x10) != 0 && (flags & 0x02) == 0 {
+                                                if tcp.header.ack_num == tcb.snd_nxt {
+                                                    println!(
+                                                        "Last ACK received, connection closed"
+                                                    );
+                                                    connections.remove(&key);
+                                                } else {
+                                                    println!("Invalid ACK");
+                                                    //send rst
+                                                }
+                                            }
+                                        }
+                                        TCPState::TimeWait => {
+                                            println!("TimeWait: TODO");
+                                            continue;
+                                        }
+                                        TCPState::Closed => {
+                                            connections.remove(&key);
+                                            continue;
+                                        }
+                                    }
+                                } else {
+                                    if !listener.contains(&tcp.header.dst_port) {
+                                        let recv_ip = &ipv4.header.fields;
+                                        let recv_tcp = &tcp.header;
+                                        // send_rst(&dev, &h.header.fields, &tcp.header);
+                                        continue;
+                                    }
+                                    let flags = tcp.header.flags;
+                                    if (flags & 0x02) != 0 && (flags & 0x10) == 0 {
+                                        let recv_ip = &ipv4.header.fields;
+                                        let recv_tcp = &tcp.header;
+                                        let iss: u32 = rand::random();
+                                        let mut tcp_packet = TCPPacket {
+                                            header: TCPHeader {
+                                                src_port: recv_tcp.dst_port,
+                                                dst_port: recv_tcp.src_port,
+                                                seq_num: iss,
+                                                ack_num: recv_tcp.seq_num + 1,
+                                                data_offset: 5,
+                                                flags: 0x12,
+                                                window: 64240,
+                                                checksum: 0,
+                                                urgent_ptr: 0,
+                                            },
+                                            payload: vec![],
+                                        };
+
+                                        let ip_fields = Ipv4HeaderFields {
+                                            version: 4,
+                                            ihl: 5,
+                                            tos: 0,
+                                            total_length: 40,
+                                            identification: 0,
+                                            flags: 0,
+                                            fragment_offset: 0,
+                                            ttl: 64,
+                                            protocol: 6,
+                                            source: recv_ip.destination,
+                                            destination: recv_ip.source,
+                                        };
+
+                                        let ip_chk = ip_checksum(&ip_fields);
+                                        let tcp_chk = tcp_checksum(
+                                            recv_ip.destination,
+                                            recv_ip.source,
+                                            &tcp_packet,
+                                        );
+                                        tcp_packet.header.checksum = tcp_chk;
+
+                                        let ip_header = Ipv4Header {
+                                            fields: ip_fields,
+                                            header_checksum: ip_chk,
+                                        };
+                                        connections.insert(
+                                            key,
+                                            TCB {
+                                                state: TCPState::SynReceived,
+
+                                                iss,
+                                                snd_una: iss,
+                                                snd_nxt: iss + 1,
+
+                                                irs: tcp.header.seq_num,
+                                                rcv_nxt: tcp.header.seq_num + 1,
+                                            },
+                                        );
+                                        //let packet = create_packet(&tcp_packet, &ip_header);
+                                        //dev.send(&packet);
+
+                                        println!("SYN received, SYN-ACK sent");
+                                    } else {
+                                        //send_rst(&dev, &h.header.fields, &tcp.header);
+                                    }
+                                }
                             }
                         }
 
