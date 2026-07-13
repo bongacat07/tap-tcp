@@ -7,6 +7,7 @@ use tap_tcp::icmp::icmp::*;
 use tap_tcp::ip::ip::*;
 use tap_tcp::tcp::send::*;
 use tap_tcp::tcp::tcp::*;
+use tap_tcp::udp::quote::get_quote;
 use tap_tcp::udp::udp::*;
 use tun_tap::{Iface, Mode};
 fn main() {
@@ -268,6 +269,7 @@ fn main() {
                             print_ipv4(&ipv4);
                             if let Some(incoming_udp) = parse_udp(&ipv4.payload) {
                                 print_udp(&incoming_udp);
+                                get_quote(&iface, &incoming_udp, &ipv4, &frame);
                             }
                         }
 

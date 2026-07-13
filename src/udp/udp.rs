@@ -1,3 +1,5 @@
+use crate::ip::ip::*;
+
 pub struct UDPHeader {
     pub src_port: u16,
     pub dst_port: u16,
@@ -44,4 +46,19 @@ pub fn print_udp(u: &UDPPacket) {
         u.checksum,
         u.payload.len(),
     );
+}
+
+pub fn create_udp_packet(udp: &UDPPacket, ip: &Ipv4Header) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(ip.fields.total_length as usize);
+
+    buf.extend_from_slice(&serialize_ipv4_header(ip));
+
+    buf.extend_from_slice(&udp.header.src_port.to_be_bytes());
+    buf.extend_from_slice(&udp.header.dst_port.to_be_bytes());
+    buf.extend_from_slice(&udp.header.length.to_be_bytes());
+    buf.extend_from_slice(&udp.checksum.to_be_bytes());
+
+    buf.extend_from_slice(&udp.payload);
+
+    buf
 }

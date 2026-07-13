@@ -56,3 +56,23 @@ pub fn ip_checksum(h: &Ipv4HeaderFields) -> u16 {
     };
     checksum(&serialize_ipv4_header(&header))
 }
+pub fn udp_checksum(src_ip: [u8; 4], dst_ip: [u8; 4], udp: &UDPPacket) -> u16 {
+    let udp_len = 8 + udp.payload.len() as u16;
+
+    let mut buf = Vec::with_capacity(12 + udp_len as usize);
+
+    buf.extend_from_slice(&src_ip);
+    buf.extend_from_slice(&dst_ip);
+    buf.push(0);
+    buf.push(17);
+    buf.extend_from_slice(&udp_len.to_be_bytes());
+
+    buf.extend_from_slice(&udp.header.src_port.to_be_bytes());
+    buf.extend_from_slice(&udp.header.dst_port.to_be_bytes());
+    buf.extend_from_slice(&udp_len.to_be_bytes());
+    buf.extend_from_slice(&0u16.to_be_bytes());
+
+    buf.extend_from_slice(&udp.payload);
+
+    checksum(&buf)
+}
