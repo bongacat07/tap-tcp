@@ -1,3 +1,5 @@
+pub const MY_IP: [u8; 4] = [10, 0, 0, 2];
+#[derive(Clone, Copy)]
 pub struct Ipv4HeaderFields {
     pub version: u8,
     pub ihl: u8,

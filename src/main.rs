@@ -5,62 +5,10 @@ use tap_tcp::eth::arp::{ArpPacket, parse_arp, print_arp, send_arp_reply};
 use tap_tcp::eth::ethernet::{EthernetFrame, parse_ethernet_frame, print_ethernet_frame};
 use tap_tcp::icmp::icmp::*;
 use tap_tcp::ip::ip::*;
+use tap_tcp::tcp::send::*;
 use tap_tcp::tcp::tcp::*;
 use tap_tcp::udp::udp::*;
 use tun_tap::{Iface, Mode};
-
-fn send_icmp_echo_reply(iface: &Iface, eth: &EthernetFrame, ipv4: &Ipv4Packet, icmp: &IcmpPacket) {
-    let mut icmp_header = IcmpHeader {
-        icmp_type: 0,
-        code: 0,
-        checksum: 0,
-        extended_header: icmp.fields.extended_header,
-    };
-
-    let mut icmp_buf = serialize_icmp_header(&icmp_header);
-    icmp_buf.extend_from_slice(&icmp.payload);
-
-    let icmp_checksum = checksum(&icmp_buf);
-    icmp_header.checksum = icmp_checksum;
-    let mut icmp_buf = serialize_icmp_header(&icmp_header);
-    icmp_buf.extend_from_slice(&icmp.payload);
-
-    let total_length = (20 + icmp_buf.len()) as u16;
-    let mut ip_header = Ipv4Header {
-        fields: Ipv4HeaderFields {
-            version: 4,
-            ihl: 5,
-            tos: 0,
-            total_length,
-            identification: 0,
-            flags: 0,
-            fragment_offset: 0,
-            ttl: 64,
-            protocol: 1,
-            source: MY_IP,
-            destination: ipv4.header.fields.source,
-        },
-        header_checksum: 0,
-    };
-
-    let ip_buf_for_checksum = serialize_ipv4_header(&ip_header);
-    let ip_checksum = checksum(&ip_buf_for_checksum[..20]);
-    ip_header.header_checksum = ip_checksum;
-
-    let mut ip_buf = serialize_ipv4_header(&ip_header);
-    ip_buf.extend_from_slice(&icmp_buf);
-
-    let mut frame = Vec::new();
-    frame.extend_from_slice(&eth.src_mac);
-    frame.extend_from_slice(&MY_MAC);
-    frame.extend_from_slice(&0x0800u16.to_be_bytes());
-    frame.extend_from_slice(&ip_buf);
-
-    iface.send(&frame).expect("failed to send");
-}
-const MY_MAC: [u8; 6] = [0x06, 0x09, 0x04, 0x02, 0x00, 0x0a];
-const MY_IP: [u8; 4] = [10, 0, 0, 2];
-
 fn main() {
     let iface = Iface::without_packet_info("tap0", Mode::Tap).expect("Failed to create TAP device");
 
@@ -148,11 +96,15 @@ fn main() {
                                 // checksum is valid
                             } else {
                                 // checksum is invalid
+                                continue;
                             }
 
                             print_ipv4(&ipv4);
                             if let Some(tcp) = parse_tcp(&ipv4.payload) {
                                 print_tcp(&tcp);
+
+                                //Create a connectionKey 4 tuple
+                                // The first step is to check whether this connection is being tracked by a TCB or not
 
                                 let key = ConnectionKey {
                                     src_ip: ipv4.header.fields.source,
@@ -163,164 +115,142 @@ fn main() {
 
                                 if let Some(tcb) = connections.get_mut(&key) {
                                     let flags = tcp.header.flags;
-
+                                    //Regardless of your state, you stop tracking the connection
+                                    // when you recieve a RST.
                                     if check_flags(&flags, RST) {
                                         connections.remove(&key);
                                         println!("RST received, connection aborted");
                                         continue;
                                     }
+                                    //On identifying that the Key exists
+                                    // The state is tracked by the TCB.
+                                    // We match based on the current state and handle the packet accordingly.
                                     match tcb.state {
                                         TCPState::SynReceived => {
+                                            //The three way handshake =>
+                                            // SYN (peer sends this) -> SYN_ACK (local sends this out)-> ACK (peer sends it back)
+                                            // Why a 3 way handshake is mentioned in www.ihateabstractions.fun/why-not-a-2-way-handshake
+                                            //
+                                            // Check if it's an ACK
                                             if check_flags(&flags, ACK) {
+                                                //QUITE CRUCIAL:
+                                                // Even if it's an ACK, it can be a crated ACK Packet or an ACK not meant for this connection
+                                                // Check the recieved ACK'S num with snd_next
+                                                //
+                                                // Client                         Server
+                                                //
+                                                //SEQ = x, SYN  -------------------->
+                                                //<-------------  SEQ = y, ACK = x+1, SYN
+                                                //ACK = y+1  ------------------------->
+                                                //
+
                                                 if tcp.header.ack_num == tcb.snd_nxt {
+                                                    // Our SYN has been acknowledged.
+                                                    // Handshake complete.
                                                     tcb.state = TCPState::Established;
                                                     tcb.snd_una = tcp.header.ack_num;
-
                                                     println!("Handshake complete");
+
+                                                    //Send RST Because Invalid ACK
                                                 } else {
                                                     println!("Invalid ACK");
-                                                    //send rst
-                                                    continue;
-                                                }
-                                            } else {
-                                                //send rst
-                                                connections.remove(&key);
-                                                continue;
-                                            }
-                                        }
-                                        TCPState::SynSent => {
-                                            println!("SynSent: TODO");
-                                            continue;
-                                        }
-                                        TCPState::Established => {
-                                            if flags & 0x02 != 0 {
-                                                println!("Duplicate SYN in Established");
-                                                //send rst
-                                                connections.remove(&key);
-                                                continue;
-                                            }
-
-                                            if flags & 0x18 == 0x18 {}
-                                            if flags & 0x01 != 0 {
-                                                if tcp.header.seq_num == tcb.rcv_nxt {
-                                                    println!("Fin Recieved");
-                                                    tcb.rcv_nxt += 1;
-                                                    //send ack
-                                                    tcb.state = TCPState::CloseWait;
-                                                }
-                                            }
-                                        }
-                                        TCPState::FinWait1 => {
-                                            println!("FinWait1: TODO");
-                                            continue;
-                                        }
-                                        TCPState::FinWait2 => {
-                                            println!("FinWait2: TODO");
-                                            continue;
-                                        }
-                                        TCPState::CloseWait => {
-                                            //send fin
-                                            tcb.snd_nxt += 1;
-                                            tcb.state = TCPState::LastAck;
-                                        }
-                                        TCPState::Closing => {
-                                            println!("Closing: TODO");
-                                            continue;
-                                        }
-                                        TCPState::LastAck => {
-                                            if (flags & 0x10) != 0 && (flags & 0x02) == 0 {
-                                                if tcp.header.ack_num == tcb.snd_nxt {
-                                                    println!(
-                                                        "Last ACK received, connection closed"
+                                                    send_rst(
+                                                        &iface,
+                                                        &ipv4.header.fields,
+                                                        &tcp.header,
+                                                        &frame,
                                                     );
                                                     connections.remove(&key);
-                                                } else {
-                                                    println!("Invalid ACK");
-                                                    //send rst
+                                                    continue;
                                                 }
+
+                                                //Send RST because it's not ACK
+                                            } else {
+                                                send_rst(
+                                                    &iface,
+                                                    &ipv4.header.fields,
+                                                    &tcp.header,
+                                                    &frame,
+                                                );
+
+                                                //remove Key from TCB
+                                                connections.remove(&key);
+                                                continue;
                                             }
                                         }
-                                        TCPState::TimeWait => {
-                                            println!("TimeWait: TODO");
-                                            continue;
+                                        //This is the listener side's implementation. That is: No Initiating the connection.
+                                        TCPState::SynSent => {}
+
+                                        TCPState::Established => {
+                                            println!("TODO");
                                         }
+
+                                        TCPState::FinWait1 => {
+                                            println!("TODO");
+                                        }
+
+                                        TCPState::FinWait2 => {
+                                            println!("TODO");
+                                        }
+
+                                        TCPState::CloseWait => {
+                                            println!("TODO");
+                                        }
+
+                                        TCPState::Closing => {
+                                            println!("TODO");
+                                        }
+
+                                        TCPState::LastAck => {
+                                            println!("TODO");
+                                        }
+
+                                        TCPState::TimeWait => {
+                                            println!("TODO");
+                                        }
+
                                         TCPState::Closed => {
-                                            connections.remove(&key);
-                                            continue;
+                                            println!("TODO");
                                         }
                                     }
+                                    //This connection doesn't exist, since the TCB can't identify the 4 tuple
                                 } else {
+                                    //See if the port number is valid
                                     if !listener.contains(&tcp.header.dst_port) {
-                                        let recv_ip = &ipv4.header.fields;
-                                        let recv_tcp = &tcp.header;
-                                        // send_rst(&dev, &h.header.fields, &tcp.header);
+                                        send_rst(&iface, &ipv4.header.fields, &tcp.header, &frame);
                                         continue;
                                     }
+
                                     let flags = tcp.header.flags;
-                                    if (flags & 0x02) != 0 && (flags & 0x10) == 0 {
-                                        let recv_ip = &ipv4.header.fields;
-                                        let recv_tcp = &tcp.header;
+                                    //Check if it's a SYN FLAG
+                                    // Meaning, a new connection is to be formed.
+                                    // Since it's a SYN, Send a synack
+                                    if check_flags(&flags, SYN) && !check_flags(&flags, ACK) {
                                         let iss: u32 = rand::random();
-                                        let mut tcp_packet = TCPPacket {
-                                            header: TCPHeader {
-                                                src_port: recv_tcp.dst_port,
-                                                dst_port: recv_tcp.src_port,
-                                                seq_num: iss,
-                                                ack_num: recv_tcp.seq_num + 1,
-                                                data_offset: 5,
-                                                flags: 0x12,
-                                                window: 64240,
-                                                checksum: 0,
-                                                urgent_ptr: 0,
-                                            },
-                                            payload: vec![],
-                                        };
-
-                                        let ip_fields = Ipv4HeaderFields {
-                                            version: 4,
-                                            ihl: 5,
-                                            tos: 0,
-                                            total_length: 40,
-                                            identification: 0,
-                                            flags: 0,
-                                            fragment_offset: 0,
-                                            ttl: 64,
-                                            protocol: 6,
-                                            source: recv_ip.destination,
-                                            destination: recv_ip.source,
-                                        };
-
-                                        let ip_chk = ip_checksum(&ip_fields);
-                                        let tcp_chk = tcp_checksum(
-                                            recv_ip.destination,
-                                            recv_ip.source,
-                                            &tcp_packet,
-                                        );
-                                        tcp_packet.header.checksum = tcp_chk;
-
-                                        let ip_header = Ipv4Header {
-                                            fields: ip_fields,
-                                            header_checksum: ip_chk,
-                                        };
+                                        //We insert the approarriate values into the TCB
                                         connections.insert(
                                             key,
                                             TCB {
                                                 state: TCPState::SynReceived,
-
                                                 iss,
                                                 snd_una: iss,
-                                                snd_nxt: iss + 1,
-
+                                                snd_nxt: iss.wrapping_add(1),
                                                 irs: tcp.header.seq_num,
-                                                rcv_nxt: tcp.header.seq_num + 1,
+                                                rcv_nxt: tcp.header.seq_num.wrapping_add(1),
                                             },
                                         );
-                                        //let packet = create_packet(&tcp_packet, &ip_header);
-                                        //dev.send(&packet);
-
+                                        //Send SYN ACK
+                                        send_syn_ack(
+                                            &iface,
+                                            &ipv4.header.fields,
+                                            &tcp.header,
+                                            &frame,
+                                            iss,
+                                        );
                                         println!("SYN received, SYN-ACK sent");
+                                        //If it's any other packet, just send RST
                                     } else {
-                                        //send_rst(&dev, &h.header.fields, &tcp.header);
+                                        send_rst(&iface, &ipv4.header.fields, &tcp.header, &frame);
                                     }
                                 }
                             }

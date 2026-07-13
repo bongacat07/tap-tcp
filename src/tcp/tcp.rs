@@ -1,3 +1,8 @@
+use crate::checksum::checksum::*;
+use crate::eth::ethernet::*;
+use crate::ip::ip::*;
+use tun_tap::Iface;
+
 pub const SYN: u16 = 0b0000_0000_0000_0010;
 pub const ACK: u16 = 0b0000_0000_0001_0000;
 pub const FIN: u16 = 0b0000_0000_0000_0001;
@@ -5,6 +10,12 @@ pub const RST: u16 = 0b0000_0000_0000_0100;
 pub const PSH: u16 = 0b0000_0000_0000_1000;
 pub const URG: u16 = 0b0000_0000_0010_0000;
 
+pub const SYN_ACK: u16 = SYN | ACK;
+pub const FIN_ACK: u16 = FIN | ACK;
+pub const PUSH_ACK: u16 = PSH | ACK;
+pub const RST_ACK: u16 = RST | ACK;
+
+#[derive(Clone, Copy)]
 pub struct TCPHeader {
     pub src_port: u16,
     pub dst_port: u16,
@@ -125,4 +136,18 @@ pub fn print_tcp(tcp: &TCPPacket) {
 
 pub fn check_flags(incoming_flags: &u16, tcp_flags: u16) -> bool {
     return (incoming_flags & tcp_flags != 0);
+}
+
+pub fn serialize_tcp_header(h: &TCPHeader) -> Vec<u8> {
+    let mut buf = Vec::with_capacity(20);
+    buf.extend_from_slice(&h.src_port.to_be_bytes());
+    buf.extend_from_slice(&h.dst_port.to_be_bytes());
+    buf.extend_from_slice(&h.seq_num.to_be_bytes());
+    buf.extend_from_slice(&h.ack_num.to_be_bytes());
+    let data_offset_flags = ((h.data_offset as u16) << 12) | (h.flags & 0x0FFF);
+    buf.extend_from_slice(&data_offset_flags.to_be_bytes());
+    buf.extend_from_slice(&h.window.to_be_bytes());
+    buf.extend_from_slice(&h.checksum.to_be_bytes());
+    buf.extend_from_slice(&h.urgent_ptr.to_be_bytes());
+    buf
 }
