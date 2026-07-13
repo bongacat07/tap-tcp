@@ -122,11 +122,11 @@ sudo ip tuntap del dev tap0 mode tap
 
 ## Roadmap
 
-* [ ] Ethernet frame parsing
-* [ ] ARP implementation
-* [ ] IPv4 packet parsing
-* [ ] ICMP (Ping)
-* [ ] UDP support
+* [X] Ethernet frame parsing
+* [X] ARP implementation
+* [X] IPv4 packet parsing
+* [X] ICMP (Ping)
+* [X] UDP support
 * [ ] TCP implementation
 * [ ] Routing
 * [ ] Packet checksum validation
