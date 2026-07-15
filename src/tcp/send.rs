@@ -3,7 +3,6 @@ use crate::eth::ethernet::*;
 use crate::ip::ip::*;
 use crate::tcp::tcp::*;
 use tun_tap::Iface;
-
 pub fn send_rst(
     iface: &Iface,
     recv_ip: &Ipv4HeaderFields,
@@ -17,7 +16,7 @@ pub fn send_rst(
             seq_num: recv_tcp.ack_num,
             ack_num: recv_tcp.seq_num.wrapping_add(1),
             data_offset: 5,
-            flags: 0x04, // RST
+            flags: 0x04,
             window: 0,
             checksum: 0,
             urgent_ptr: 0,
@@ -29,119 +28,7 @@ pub fn send_rst(
         version: 4,
         ihl: 5,
         tos: 0,
-        total_length: 40, // 20 (IP) + 20 (TCP, no payload)
-        identification: 0,
-        flags: 0,
-        fragment_offset: 0,
-        ttl: 64,
-        protocol: 6,
-        source: recv_ip.destination,
-        destination: recv_ip.source,
-    };
-
-    // TCP checksum uses the pseudo-header, so it needs the (swapped) src/dst
-    tcp_packet.header.checksum = tcp_checksum(ip_fields.source, ip_fields.destination, &tcp_packet);
-
-    let ip_header = Ipv4Header {
-        fields: ip_fields,
-        header_checksum: ip_checksum(&ip_fields),
-    };
-
-    let ip_tcp_buf = create_packet(&tcp_packet, &ip_header);
-
-    let mut frame = Vec::new();
-    frame.extend_from_slice(&eth.src_mac); // dst mac = whoever sent us the packet
-    frame.extend_from_slice(&MY_MAC); // src mac = us
-    frame.extend_from_slice(&0x0800u16.to_be_bytes());
-    frame.extend_from_slice(&ip_tcp_buf);
-
-    iface.send(&frame).expect("failed to send RST");
-    println!("RST sent");
-}
-
-pub fn send_ack(
-    iface: &Iface,
-    recv_ip: &Ipv4HeaderFields,
-    recv_tcp: &TCPHeader,
-    eth: &EthernetFrame,
-    seq: u32,
-    ack: u32,
-) {
-    let mut tcp_packet = TCPPacket {
-        header: TCPHeader {
-            src_port: recv_tcp.dst_port,
-            dst_port: recv_tcp.src_port,
-            seq_num: seq,
-            ack_num: ack,
-            data_offset: 5,
-            flags: 0x10, // ACK
-            window: 64240,
-            checksum: 0,
-            urgent_ptr: 0,
-        },
-        payload: vec![],
-    };
-
-    let ip_fields = Ipv4HeaderFields {
-        version: 4,
-        ihl: 5,
-        tos: 0,
-        total_length: 40, // 20 (IP) + 20 (TCP, no payload)
-        identification: 0,
-        flags: 0,
-        fragment_offset: 0,
-        ttl: 64,
-        protocol: 6,
-        source: recv_ip.destination,
-        destination: recv_ip.source,
-    };
-
-    tcp_packet.header.checksum = tcp_checksum(ip_fields.source, ip_fields.destination, &tcp_packet);
-
-    let ip_header = Ipv4Header {
-        fields: ip_fields,
-        header_checksum: ip_checksum(&ip_fields),
-    };
-
-    let ip_tcp_buf = create_packet(&tcp_packet, &ip_header);
-
-    let mut frame = Vec::new();
-    frame.extend_from_slice(&eth.src_mac); // dst mac = whoever sent us the packet
-    frame.extend_from_slice(&MY_MAC); // src mac = us
-    frame.extend_from_slice(&0x0800u16.to_be_bytes());
-    frame.extend_from_slice(&ip_tcp_buf);
-
-    iface.send(&frame).expect("failed to send ACK");
-    println!("ACK sent");
-}
-
-pub fn send_syn_ack(
-    iface: &Iface,
-    recv_ip: &Ipv4HeaderFields,
-    recv_tcp: &TCPHeader,
-    eth: &EthernetFrame,
-    seq: u32,
-) {
-    let mut tcp_packet = TCPPacket {
-        header: TCPHeader {
-            src_port: recv_tcp.dst_port,
-            dst_port: recv_tcp.src_port,
-            seq_num: seq,                              // our initial sequence number
-            ack_num: recv_tcp.seq_num.wrapping_add(1), // ack their SYN
-            data_offset: 5,
-            flags: 0x12, // SYN + ACK
-            window: 64240,
-            checksum: 0,
-            urgent_ptr: 0,
-        },
-        payload: vec![],
-    };
-
-    let ip_fields = Ipv4HeaderFields {
-        version: 4,
-        ihl: 5,
-        tos: 0,
-        total_length: 40, // 20 (IP) + 20 (TCP, no options/payload)
+        total_length: 40,
         identification: 0,
         flags: 0,
         fragment_offset: 0,
@@ -166,10 +53,120 @@ pub fn send_syn_ack(
     frame.extend_from_slice(&0x0800u16.to_be_bytes());
     frame.extend_from_slice(&ip_tcp_buf);
 
+    iface.send(&frame).expect("failed to send RST");
+    println!("RST sent");
+}
+
+pub fn send_ack(
+    iface: &Iface,
+    recv_ip: &Ipv4HeaderFields,
+    recv_tcp: &TCPHeader,
+    eth: &EthernetFrame,
+    seq: u32,
+    ack: u32,
+) {
+    let mut tcp_packet = TCPPacket {
+        header: TCPHeader {
+            src_port: recv_tcp.dst_port,
+            dst_port: recv_tcp.src_port,
+            seq_num: seq,
+            ack_num: ack,
+            data_offset: 5,
+            flags: 0x10,
+            window: 64240,
+            checksum: 0,
+            urgent_ptr: 0,
+        },
+        payload: vec![],
+    };
+
+    let ip_fields = Ipv4HeaderFields {
+        version: 4,
+        ihl: 5,
+        tos: 0,
+        total_length: 40,
+        identification: 0,
+        flags: 0,
+        fragment_offset: 0,
+        ttl: 64,
+        protocol: 6,
+        source: recv_ip.destination,
+        destination: recv_ip.source,
+    };
+
+    tcp_packet.header.checksum = tcp_checksum(ip_fields.source, ip_fields.destination, &tcp_packet);
+
+    let ip_header = Ipv4Header {
+        fields: ip_fields,
+        header_checksum: ip_checksum(&ip_fields),
+    };
+
+    let ip_tcp_buf = create_packet(&tcp_packet, &ip_header);
+
+    let mut frame = Vec::new();
+    frame.extend_from_slice(&eth.src_mac);
+    frame.extend_from_slice(&MY_MAC);
+    frame.extend_from_slice(&0x0800u16.to_be_bytes());
+    frame.extend_from_slice(&ip_tcp_buf);
+
+    iface.send(&frame).expect("failed to send ACK");
+    println!("ACK sent");
+}
+
+pub fn send_syn_ack(
+    iface: &Iface,
+    recv_ip: &Ipv4HeaderFields,
+    recv_tcp: &TCPHeader,
+    eth: &EthernetFrame,
+    seq: u32,
+) {
+    let mut tcp_packet = TCPPacket {
+        header: TCPHeader {
+            src_port: recv_tcp.dst_port,
+            dst_port: recv_tcp.src_port,
+            seq_num: seq,
+            ack_num: recv_tcp.seq_num.wrapping_add(1),
+            data_offset: 5,
+            flags: 0x12,
+            window: 64240,
+            checksum: 0,
+            urgent_ptr: 0,
+        },
+        payload: vec![],
+    };
+
+    let ip_fields = Ipv4HeaderFields {
+        version: 4,
+        ihl: 5,
+        tos: 0,
+        total_length: 40,
+        identification: 0,
+        flags: 0,
+        fragment_offset: 0,
+        ttl: 64,
+        protocol: 6,
+        source: recv_ip.destination,
+        destination: recv_ip.source,
+    };
+
+    tcp_packet.header.checksum = tcp_checksum(ip_fields.source, ip_fields.destination, &tcp_packet);
+
+    let ip_header = Ipv4Header {
+        fields: ip_fields,
+        header_checksum: ip_checksum(&ip_fields),
+    };
+
+    let ip_tcp_buf = create_packet(&tcp_packet, &ip_header);
+
+    let mut frame = Vec::new();
+    frame.extend_from_slice(&eth.src_mac);
+    frame.extend_from_slice(&MY_MAC);
+    frame.extend_from_slice(&0x0800u16.to_be_bytes());
+    frame.extend_from_slice(&ip_tcp_buf);
     iface.send(&frame).expect("failed to send SYN-ACK");
     println!("SYN-ACK sent");
 }
-/// Builds just the IPv4 header + TCP header/payload bytes (no Ethernet framing).
+
 pub fn create_packet(x: &TCPPacket, y: &Ipv4Header) -> Vec<u8> {
     let mut buf: Vec<u8> = Vec::new();
 

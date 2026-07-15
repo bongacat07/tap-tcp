@@ -15,7 +15,7 @@ fn main() {
 
     println!("Listening on tap0");
 
-    let mut buf = vec![0u8; 1504];
+    let mut buf = vec![0u8; 65535];
     let mut connections: HashMap<ConnectionKey, TCB> = HashMap::new();
     let mut listener: HashSet<u16> = HashSet::new();
     listener.insert(8080);
@@ -108,10 +108,10 @@ fn main() {
                                 // The first step is to check whether this connection is being tracked by a TCB or not
 
                                 let key = ConnectionKey {
-                                    src_ip: ipv4.header.fields.source,
-                                    src_port: tcp.header.src_port,
-                                    dst_ip: ipv4.header.fields.destination,
-                                    dst_port: tcp.header.dst_port,
+                                    src_ip: ipv4.header.fields.destination,
+                                    src_port: tcp.header.dst_port,
+                                    dst_ip: ipv4.header.fields.source,
+                                    dst_port: tcp.header.src_port,
                                 };
 
                                 if let Some(tcb) = connections.get_mut(&key) {
@@ -229,6 +229,7 @@ fn main() {
                                     if check_flags(&flags, SYN) && !check_flags(&flags, ACK) {
                                         let iss: u32 = rand::random();
                                         //We insert the approarriate values into the TCB
+                                        // Change state to SYN_RECIEVED
                                         connections.insert(
                                             key,
                                             TCB {
