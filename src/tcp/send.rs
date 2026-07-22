@@ -196,3 +196,65 @@ pub fn create_packet(x: &TCPPacket, y: &Ipv4Header) -> Vec<u8> {
 
     buf
 }
+
+/// Sends a FIN+ACK for the given connection.
+///
+/// `dst_mac` is the Ethernet address the frame should be sent to. This is
+/// explicit rather than hardcoded because the two callers know it
+/// differently:
+///   - The active opener (e.g. `minc`) already knows its peer's MAC as a
+///     fixed constant, since it initiated the connection to a known address.
+///   - The passive listener (e.g. `tap_tcp`) only knows the peer's MAC from
+///     whatever frame it last received (`eth.src_mac`), since it could be
+///     talking to any host that connects to it.
+/// Hardcoding a single constant here would silently break the listener case.
+pub fn send_fin_ack(key: &ConnectionKey, tcb: &mut TCB, iface: &Iface, dst_mac: [u8; 6]) {
+    let seq = tcb.snd_nxt;
+    let ack = tcb.rcv_nxt;
+
+    let mut tcp_packet = TCPPacket {
+        header: TCPHeader {
+            src_port: key.src_port,
+            dst_port: key.dst_port,
+            seq_num: seq,
+            ack_num: ack,
+            data_offset: 5,
+            flags: FIN_ACK,
+            window: 64240,
+            checksum: 0,
+            urgent_ptr: 0,
+        },
+        payload: vec![],
+    };
+    let ip_fields = Ipv4HeaderFields {
+        version: 4,
+        ihl: 5,
+        tos: 0,
+        total_length: 40, // 20 (IP) + 20 (TCP, no payload)
+        identification: 0,
+        flags: 0,
+        fragment_offset: 0,
+        ttl: 64,
+        protocol: 6,
+        source: key.src_ip,
+        destination: key.dst_ip,
+    };
+
+    tcp_packet.header.checksum = tcp_checksum(ip_fields.source, ip_fields.destination, &tcp_packet);
+
+    let ip_header = Ipv4Header {
+        fields: ip_fields,
+        header_checksum: ip_checksum(&ip_fields),
+    };
+
+    let ip_tcp_buf = create_packet(&tcp_packet, &ip_header);
+
+    let mut frame = Vec::new();
+    frame.extend_from_slice(&dst_mac);
+    frame.extend_from_slice(&MY_MAC);
+    frame.extend_from_slice(&0x0800u16.to_be_bytes());
+    frame.extend_from_slice(&ip_tcp_buf);
+
+    iface.send(&frame).expect("failed to send FIN_ACK");
+    println!("FIN_ACK sent");
+}

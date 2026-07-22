@@ -182,7 +182,32 @@ fn main() {
                                         TCPState::SynSent => {}
 
                                         TCPState::Established => {
-                                            println!("TODO");
+                                            if check_flags(&flags, FIN_ACK) {
+                                                // Advance receive sequence past the FIN.
+                                                tcb.rcv_nxt = tcp.header.seq_num.wrapping_add(1);
+
+                                                send_ack(
+                                                    &iface,
+                                                    &ipv4.header.fields,
+                                                    &tcp.header,
+                                                    &frame,
+                                                    tcb.snd_nxt,
+                                                    tcb.rcv_nxt,
+                                                );
+
+                                                // No application layer is holding this half
+                                                // of the connection open, so close our side
+                                                // immediately instead of idling in CloseWait.
+                                                // Reply to whoever actually sent us the FIN
+                                                // (frame.src_mac), not a fixed constant --
+                                                // unlike the active opener, we don't know our
+                                                // peer's MAC in advance.
+                                                send_fin_ack(&key, tcb, &iface, frame.src_mac);
+                                                tcb.snd_nxt = tcb.snd_nxt.wrapping_add(1);
+
+                                                tcb.state = TCPState::LastAck;
+                                                println!("FIN sent, awaiting final ACK");
+                                            }
                                         }
 
                                         TCPState::FinWait1 => {
@@ -202,7 +227,13 @@ fn main() {
                                         }
 
                                         TCPState::LastAck => {
-                                            println!("TODO");
+                                            if check_flags(&flags, ACK)
+                                                && tcp.header.ack_num == tcb.snd_nxt
+                                            {
+                                                println!("Final ACK received, connection closed");
+                                                connections.remove(&key);
+                                                continue;
+                                            }
                                         }
 
                                         TCPState::TimeWait => {
