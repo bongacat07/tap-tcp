@@ -1,5 +1,4 @@
 use crate::{checksum::checksum::*, eth::ethernet::*, ip::ip::*, udp::udp::*};
-use rand::prelude::IndexedRandom;
 use tun_tap::Iface;
 
 const QUOTES: [&str; 10] = [

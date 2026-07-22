@@ -1,8 +1,3 @@
-use crate::checksum::checksum::*;
-use crate::eth::ethernet::*;
-use crate::ip::ip::*;
-use tun_tap::Iface;
-
 pub const SYN: u16 = 0b0000_0000_0000_0010;
 pub const ACK: u16 = 0b0000_0000_0001_0000;
 pub const FIN: u16 = 0b0000_0000_0000_0001;
@@ -135,7 +130,7 @@ pub fn print_tcp(tcp: &TCPPacket) {
 }
 
 pub fn check_flags(incoming_flags: &u16, tcp_flags: u16) -> bool {
-    return (incoming_flags & tcp_flags != 0);
+    return incoming_flags & tcp_flags != 0;
 }
 
 pub fn serialize_tcp_header(h: &TCPHeader) -> Vec<u8> {

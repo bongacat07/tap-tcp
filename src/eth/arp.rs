@@ -12,8 +12,7 @@ pub struct ArpPacket {
     pub target_ip: [u8; 4],
 }
 const MY_MAC: [u8; 6] = [0x06, 0x09, 0x04, 0x02, 0x00, 0x0a];
-const MY_IP:  [u8; 4] = [10, 0, 0, 2];
-
+const MY_IP: [u8; 4] = [10, 0, 0, 2];
 
 pub fn parse_arp(buf: &[u8]) -> Option<ArpPacket> {
     if buf.len() < 28 {
@@ -24,11 +23,11 @@ pub fn parse_arp(buf: &[u8]) -> Option<ArpPacket> {
         protocol_type: u16::from_be_bytes([buf[2], buf[3]]),
         hardware_size: buf[4],
         protocol_size: buf[5],
-        opcode:        u16::from_be_bytes([buf[6], buf[7]]),
-        sender_mac:    buf[8..14].try_into().unwrap(),
-        sender_ip:     buf[14..18].try_into().unwrap(),
-        target_mac:    buf[18..24].try_into().unwrap(),
-        target_ip:     buf[24..28].try_into().unwrap(),
+        opcode: u16::from_be_bytes([buf[6], buf[7]]),
+        sender_mac: buf[8..14].try_into().unwrap(),
+        sender_ip: buf[14..18].try_into().unwrap(),
+        target_mac: buf[18..24].try_into().unwrap(),
+        target_ip: buf[24..28].try_into().unwrap(),
     })
 }
 
@@ -42,8 +41,16 @@ pub fn print_arp(a: &ArpPacket) {
     println!(
         "ARP {} | src {}({}.{}.{}.{}) → tgt {}({}.{}.{}.{})",
         op,
-        src_mac, src_ip[0], src_ip[1], src_ip[2], src_ip[3],
-        tgt_mac, tgt_ip[0], tgt_ip[1], tgt_ip[2], tgt_ip[3],
+        src_mac,
+        src_ip[0],
+        src_ip[1],
+        src_ip[2],
+        src_ip[3],
+        tgt_mac,
+        tgt_ip[0],
+        tgt_ip[1],
+        tgt_ip[2],
+        tgt_ip[3],
     );
 }
 
@@ -62,5 +69,5 @@ pub fn send_arp_reply(iface: &Iface, req: &ArpPacket) {
     buf.extend_from_slice(&MY_IP);
     buf.extend_from_slice(&req.sender_mac);
     buf.extend_from_slice(&req.sender_ip);
-    iface.send(&buf);
+    let _ = iface.send(&buf);
 }

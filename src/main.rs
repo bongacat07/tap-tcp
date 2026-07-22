@@ -1,8 +1,7 @@
-use rand::Rng;
 use std::collections::{HashMap, HashSet};
-use tap_tcp::checksum::checksum::{checksum, ip_checksum, tcp_checksum};
-use tap_tcp::eth::arp::{ArpPacket, parse_arp, print_arp, send_arp_reply};
-use tap_tcp::eth::ethernet::{EthernetFrame, parse_ethernet_frame, print_ethernet_frame};
+use tap_tcp::checksum::checksum::*;
+use tap_tcp::eth::arp::*;
+use tap_tcp::eth::ethernet::*;
 use tap_tcp::icmp::icmp::*;
 use tap_tcp::ip::ip::*;
 use tap_tcp::tcp::send::*;
@@ -21,8 +20,7 @@ fn main() {
     listener.insert(8080);
 
     loop {
-        let n = iface.recv(&mut buf).expect("Failed to recv");
-        let packet = &buf[..n];
+        let _ = iface.recv(&mut buf).expect("Failed to recv");
 
         let frame = parse_ethernet_frame(&buf);
 
@@ -71,6 +69,7 @@ fn main() {
                                     // checksum is valid
                                 } else {
                                     // checksum is invalid
+                                    continue;
                                 }
                                 print_icmp(&incoming_icmp);
 

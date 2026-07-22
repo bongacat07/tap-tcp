@@ -5,7 +5,14 @@ A simple userspace networking stack built on top of a Linux **TAP** interface. T
 > **Status:** Work in progress. This project is intended for learning and experimentation.
 
 ---
+## Why am I crazy enough to build a userspace netwokring stack?
 
+Is this the most optimised code? No, not at all. Production grade? Nope. No chance. But did it demistify every layer of networking? Yes. That was the goal.
+I am genuinely just writing it on my own, testing it with nc and tcpdump and other tools along each step to see if it holds. No tutorials, so all choices, either smart or dumb was made by me. 
+
+Another goal with this project was to make sure anyone who reads it, sort of understands the lifecycle of a packet. Not the journey of it through the kernel, (That's a whole different beast) but in the sense, how the headers are parsed, how the checksums are computed and how the TCP state transitions happen. So I made an attempt to make the code as readable and simple as possible.
+
+---
 ## Features
 
 * Userspace packet processing
